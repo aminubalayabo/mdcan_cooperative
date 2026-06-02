@@ -20,7 +20,6 @@ if (isset($_GET['tab']) && $_GET['tab'] === 'edit' && isset($_GET['id'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['forward_to_director'])) {
     $memberId = (int)($_POST['member_id'] ?? 0);
 
-    // Try update with forwarded_by column; fall back if column doesn't exist yet
     $rowsAffected = 0;
     try {
         $upd = $pdo->prepare("UPDATE members SET status='pending_director', forwarded_by=?, forwarded_at=NOW() WHERE id=? AND status='pending_secretary'");
@@ -33,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['forward_to_director']
     }
 
     if ($rowsAffected === 0) {
-        flashMessage('danger', 'Could not update member status. Member ID: ' . $memberId . '. It may have already been forwarded.');
+        flashMessage('danger', 'Update failed — member may already have been forwarded.');
         header('Location: ' . BASE_URL . '/admin/secretary/members.php?tab=pending');
         exit;
     }
@@ -43,36 +42,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['forward_to_director']
     $member = $stmt->fetch();
 
     if ($member) {
-        // Notify director via system notification
         $directors = $pdo->query("SELECT * FROM admins WHERE role='director' AND is_active=1")->fetchAll();
         foreach ($directors as $dir) {
             addNotification($pdo, $dir['id'], 'admin',
                 'Membership Application Ready for Approval',
                 $member['name'] . "'s application has been reviewed by the Secretary.",
                 'warning', BASE_URL . '/admin/director/members.php?tab=pending');
-
-            // Email is best-effort — never block the workflow
             try {
-                sendMdcanEmail(
-                    $dir['email'], $dir['name'],
+                sendMdcanEmail($dir['email'], $dir['name'],
                     'Membership Application Awaiting Your Approval – ' . $member['name'],
-                    emailForwardedToDirector($member, $dir['name'])
-                );
+                    emailForwardedToDirector($member, $dir['name']));
             } catch (\Exception $e) {
                 error_log('Forward email failed: ' . $e->getMessage());
             }
         }
-
-        // Notify the applicant
-        addNotification($pdo, $memberId, 'member',
-            'Application Progress',
-            'Your application has been reviewed by the Secretary and forwarded to the Director for final approval.',
-            'info');
-
+        addNotification($pdo, $memberId, 'member', 'Application Progress',
+            'Your application has been forwarded to the Director for final approval.', 'info');
         logAudit($pdo, $_SESSION['user_id'], 'admin', 'membership_forwarded', "Member ID: $memberId");
         flashMessage('success', $member['name'] . "'s application forwarded to the Director.");
     } else {
-        flashMessage('danger', 'Could not find member record. Please try again.');
+        flashMessage('danger', 'Member record not found.');
     }
 
     header('Location: ' . BASE_URL . '/admin/secretary/members.php?tab=pending');
