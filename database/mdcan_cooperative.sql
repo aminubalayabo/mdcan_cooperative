@@ -225,13 +225,14 @@ CREATE TABLE payroll_exports (
 -- ------------------------------------------------------------
 -- Default Admin Accounts (password: mdcan2024)
 -- ------------------------------------------------------------
+-- Default password for all accounts: mdcan2024
 INSERT INTO admins (name, email, password, role, phone) VALUES
 ('MDCAN Director', 'director@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'director', '08000000001'),
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'director', '08000000001'),
 ('MDCAN Secretary', 'secretary@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'secretary', '08000000002');
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'secretary', '08000000002');
 
 -- Demo member (password: mdcan2024)
 INSERT INTO members (mno, name, department, gsm, email, password, bank_name, account_number, next_of_kin, next_of_kin_gsm, registration_date, status) VALUES
-('MNO-001', 'Demo Member', 'Administration', '08011111111', 'member@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'First Bank', '1234567890', 'Demo Next of Kin', '08022222222', CURDATE(), 'active');
+('MNO-0001', 'Demo Member', 'Administration', '08011111111', 'member@mdcan.edu.ng',
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'First Bank', '1234567890', 'Demo Next of Kin', '08022222222', CURDATE(), 'active');
