@@ -1,4 +1,6 @@
 <?php
+ob_start(); // Prevent "headers already sent" caused by BOMs or whitespace in included files
+
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'mdcan_cooperative');
 define('DB_USER', 'root');

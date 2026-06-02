@@ -21,13 +21,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['forward_to_director']
     $memberId = (int)($_POST['member_id'] ?? 0);
 
     // Try update with forwarded_by column; fall back if column doesn't exist yet
+    $rowsAffected = 0;
     try {
-        $pdo->prepare("UPDATE members SET status='pending_director', forwarded_by=?, forwarded_at=NOW() WHERE id=? AND status='pending_secretary'")
-            ->execute([$_SESSION['user_id'], $memberId]);
+        $upd = $pdo->prepare("UPDATE members SET status='pending_director', forwarded_by=?, forwarded_at=NOW() WHERE id=? AND status='pending_secretary'");
+        $upd->execute([$_SESSION['user_id'], $memberId]);
+        $rowsAffected = $upd->rowCount();
     } catch (PDOException $e) {
-        // Migration not run yet — update without the extra columns
-        $pdo->prepare("UPDATE members SET status='pending_director' WHERE id=? AND status='pending_secretary'")
-            ->execute([$memberId]);
+        $upd2 = $pdo->prepare("UPDATE members SET status='pending_director' WHERE id=? AND status='pending_secretary'");
+        $upd2->execute([$memberId]);
+        $rowsAffected = $upd2->rowCount();
+    }
+
+    if ($rowsAffected === 0) {
+        flashMessage('danger', 'Could not update member status. Member ID: ' . $memberId . '. It may have already been forwarded.');
+        header('Location: ' . BASE_URL . '/admin/secretary/members.php?tab=pending');
+        exit;
     }
 
     $stmt = $pdo->prepare("SELECT * FROM members WHERE id=?");
