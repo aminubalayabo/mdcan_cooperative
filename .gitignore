@@ -1,0 +1,20 @@
+# Environment & config overrides
+config/db.local.php
+.env
+
+# Uploaded files (keep folder structure, not content)
+uploads/guarantors/*
+uploads/documents/*
+!uploads/guarantors/.gitkeep
+!uploads/documents/.gitkeep
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+
+# PHP error logs
+*.log
+error_log

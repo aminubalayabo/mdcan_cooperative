@@ -1,0 +1,65 @@
+/* MDCAN Cooperative - Custom Styles */
+
+:root {
+    --mdcan-primary: #1a3a5c;
+    --mdcan-gold: #c9a84c;
+}
+
+.brand-link {
+    background-color: var(--mdcan-primary);
+}
+
+.info-box {
+    border-radius: 8px;
+    transition: transform .2s;
+}
+.info-box:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,.12);
+}
+
+.card {
+    border-radius: 8px;
+}
+.card-header {
+    font-weight: 600;
+}
+
+.badge {
+    font-size: .8em;
+    padding: 4px 8px;
+}
+
+.table td, .table th {
+    vertical-align: middle;
+}
+
+.sidebar-dark-primary {
+    background-color: var(--mdcan-primary);
+}
+
+.nav-sidebar .nav-link.active {
+    background-color: var(--mdcan-gold) !important;
+    color: #fff !important;
+}
+
+.btn-mdcan {
+    background-color: var(--mdcan-primary);
+    color: #fff;
+    border: none;
+}
+.btn-mdcan:hover {
+    background-color: #254d7a;
+    color: #fff;
+}
+
+.stat-icon {
+    font-size: 2.5rem;
+    opacity: .7;
+}
+
+@media (max-width: 576px) {
+    .info-box-content .info-box-number {
+        font-size: 1.2rem;
+    }
+}
