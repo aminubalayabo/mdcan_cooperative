@@ -24,12 +24,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_member'])) {
     $member = $stmt->fetch();
 
     if ($member) {
-        // Email member with MNO
-        sendMdcanEmail(
-            $member['email'], $member['name'],
-            'Welcome to MDCAN Cooperative – Membership Approved!',
-            emailMemberApproved($member)
-        );
+        // Email member with MNO (best-effort — never block the workflow)
+        try {
+            sendMdcanEmail(
+                $member['email'], $member['name'],
+                'Welcome to MDCAN Cooperative – Membership Approved!',
+                emailMemberApproved($member)
+            );
+        } catch (\Exception $e) {
+            error_log('Approval email failed: ' . $e->getMessage());
+        }
 
         // System notification for the member (visible once they log in)
         addNotification($pdo, $memberId, 'member',
@@ -71,11 +75,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_member'])) {
     $member = $stmt->fetch();
 
     if ($member) {
-        sendMdcanEmail(
-            $member['email'], $member['name'],
-            'MDCAN Cooperative – Membership Application Not Approved',
-            emailMemberRejected($member, $reason)
-        );
+        try {
+            sendMdcanEmail(
+                $member['email'], $member['name'],
+                'MDCAN Cooperative – Membership Application Not Approved',
+                emailMemberRejected($member, $reason)
+            );
+        } catch (\Exception $e) {
+            error_log('Rejection email failed: ' . $e->getMessage());
+        }
 
         if ($member['forwarded_by']) {
             addNotification($pdo, $member['forwarded_by'], 'admin',

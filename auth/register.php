@@ -52,12 +52,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Notify ALL secretaries by email and system notification
         $secretaries = $pdo->query("SELECT * FROM admins WHERE role='secretary' AND is_active=1")->fetchAll();
-        $memberData  = compact('name','department','gsm','email','bank_name','account_number','next_of_kin','next_of_kin_gsm');
-        $memberData['department']     = $dept;
-        $memberData['bank_name']      = $bankName;
-        $memberData['account_number'] = $accountNo;
-        $memberData['next_of_kin']    = $nok;
-        $memberData['next_of_kin_gsm']= $nokGsm;
+        $memberData = [
+            'name'           => $name,
+            'department'     => $dept,
+            'gsm'            => $gsm,
+            'email'          => $email,
+            'bank_name'      => $bankName,
+            'account_number' => $accountNo,
+            'next_of_kin'    => $nok,
+            'next_of_kin_gsm'=> $nokGsm,
+        ];
 
         foreach ($secretaries as $sec) {
             addNotification($pdo, $sec['id'], 'admin',
@@ -65,11 +69,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "$name has submitted a membership application. Please review.",
                 'info', BASE_URL . '/admin/secretary/members.php?tab=pending');
 
-            sendMdcanEmail(
-                $sec['email'], $sec['name'],
-                'New Membership Application – ' . $name,
-                emailNewApplicationToSecretary($memberData, $sec['name'])
-            );
+            try {
+                sendMdcanEmail(
+                    $sec['email'], $sec['name'],
+                    'New Membership Application – ' . $name,
+                    emailNewApplicationToSecretary($memberData, $sec['name'])
+                );
+            } catch (\Exception $e) {
+                error_log('Registration email failed: ' . $e->getMessage());
+            }
         }
 
         logAudit($pdo, $newMemberId, 'member', 'self_registered', "New application: $name ($email)");

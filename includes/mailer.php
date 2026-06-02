@@ -1,5 +1,16 @@
 <?php
-require_once __DIR__ . '/../config/email.php';
+// Load email config; define safe defaults if file is missing or not yet configured
+if (file_exists(__DIR__ . '/../config/email.php')) {
+    require_once __DIR__ . '/../config/email.php';
+}
+if (!defined('MAIL_HOST'))      define('MAIL_HOST',      'localhost');
+if (!defined('MAIL_PORT'))      define('MAIL_PORT',      25);
+if (!defined('MAIL_USERNAME'))  define('MAIL_USERNAME',  '');
+if (!defined('MAIL_PASSWORD'))  define('MAIL_PASSWORD',  '');
+if (!defined('MAIL_SECURE'))    define('MAIL_SECURE',    'tls');
+if (!defined('MAIL_FROM'))      define('MAIL_FROM',      'noreply@mdcan.local');
+if (!defined('MAIL_FROM_NAME')) define('MAIL_FROM_NAME', 'MDCAN Cooperative');
+if (!defined('MAIL_ENABLED'))   define('MAIL_ENABLED',   false);
 
 /**
  * Send an HTML email.
