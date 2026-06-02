@@ -28,7 +28,7 @@ CREATE TABLE admins (
 -- ------------------------------------------------------------
 CREATE TABLE members (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    mno VARCHAR(20) UNIQUE NOT NULL COMMENT 'Member Number',
+    mno VARCHAR(20) UNIQUE NULL DEFAULT NULL COMMENT 'Assigned after Director approval',
     name VARCHAR(100) NOT NULL,
     department VARCHAR(100),
     gsm VARCHAR(20),
@@ -39,7 +39,10 @@ CREATE TABLE members (
     next_of_kin VARCHAR(100),
     next_of_kin_gsm VARCHAR(20),
     registration_date DATE,
-    status ENUM('active','inactive','suspended') DEFAULT 'active',
+    status ENUM('pending_secretary','pending_director','active','inactive','suspended','rejected') NOT NULL DEFAULT 'pending_secretary',
+    rejection_reason TEXT DEFAULT NULL,
+    forwarded_by INT DEFAULT NULL COMMENT 'Secretary who forwarded to Director',
+    forwarded_at TIMESTAMP NULL DEFAULT NULL,
     profile_photo VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -232,7 +235,10 @@ INSERT INTO admins (name, email, password, role, phone) VALUES
 ('MDCAN Secretary', 'secretary@mdcan.edu.ng',
  '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'secretary', '08000000002');
 
--- Demo member (password: mdcan2024)
+-- Demo member (password: mdcan2024) - pre-approved for demo use
 INSERT INTO members (mno, name, department, gsm, email, password, bank_name, account_number, next_of_kin, next_of_kin_gsm, registration_date, status) VALUES
 ('MNO-0001', 'Demo Member', 'Administration', '08011111111', 'member@mdcan.edu.ng',
  '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'First Bank', '1234567890', 'Demo Next of Kin', '08022222222', CURDATE(), 'active');
+
+-- Create shares entry for demo member
+INSERT INTO member_shares (member_id) SELECT id FROM members WHERE mno='MNO-0001';

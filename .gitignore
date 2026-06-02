@@ -18,3 +18,7 @@ Thumbs.db
 # PHP error logs
 *.log
 error_log
+
+# Keep logs folder but not content
+logs/*
+!logs/.gitkeep
