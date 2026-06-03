@@ -16,64 +16,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_single'])) {
     if ($loanId && $amount > 0) {
         $pdo->prepare("INSERT INTO loan_payments (loan_id, amount, payment_date, payment_method, notes, recorded_by) VALUES (?,?,?,?,?,?)")
             ->execute([$loanId, $amount, $date, $method, $notes, $_SESSION['user_id']]);
-
         _updateLoanStatus($pdo, $loanId);
         logAudit($pdo, $_SESSION['user_id'], 'admin', 'loan_repayment_recorded', "Loan #$loanId, ₦$amount");
         flashMessage('success', formatCurrency($amount) . ' repayment recorded for Loan #' . $loanId . '.');
-        header('Location: ' . BASE_URL . '/admin/secretary/loan_repayments.php');
-        exit;
+    } else {
+        flashMessage('danger', 'Please select a loan and enter a valid amount.');
     }
-    flashMessage('danger', 'Please select a loan and enter a valid amount.');
     header('Location: ' . BASE_URL . '/admin/secretary/loan_repayments.php');
     exit;
 }
 
-// ── Bulk CSV repayment ────────────────────────────────────────────────────────
+// ── Bulk CSV repayment (MNO-based) ────────────────────────────────────────────
 $csvResults = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_repayment_csv'])) {
     if (!empty($_FILES['csv_file']['tmp_name'])) {
         $handle  = fopen($_FILES['csv_file']['tmp_name'], 'r');
-        fgetcsv($handle); // skip header
+        fgetcsv($handle); // skip header row
 
         $inserted = 0; $skipped = 0;
         while (($row = fgetcsv($handle)) !== false) {
             if (count($row) < 2) { $skipped++; continue; }
 
-            $loanId  = (int)trim($row[0] ?? 0);
-            $amount  = (float)trim($row[1] ?? 0);
-            $date    = trim($row[2] ?? date('Y-m-d'));
-            $method  = strtolower(trim($row[3] ?? 'payroll_deduction'));
-            $notes   = trim($row[4] ?? '');
+            $mno    = strtoupper(trim($row[0] ?? ''));
+            $amount = (float)trim($row[1] ?? 0);
+            $date   = trim($row[2] ?? date('Y-m-d'));
+            $method = strtolower(trim($row[3] ?? 'payroll_deduction'));
+            $notes  = trim($row[4] ?? '');
 
-            if (!$loanId || $amount <= 0) {
-                $csvResults[] = ['row' => "Loan #$loanId", 'status' => 'error', 'msg' => 'Invalid loan_id or amount'];
+            if (!$mno || $amount <= 0) {
+                $csvResults[] = ['row' => $mno ?: '(empty)', 'status' => 'error', 'msg' => 'Missing MNO or invalid amount'];
                 $skipped++; continue;
             }
 
-            // Verify loan exists
-            $chk = $pdo->prepare("SELECT l.id, l.amount, m.name, m.mno FROM loans l JOIN members m ON l.member_id=m.id WHERE l.id=? AND l.status IN ('approved','disbursed','repaying')");
-            $chk->execute([$loanId]);
-            $loan = $chk->fetch();
+            // Lookup member by MNO
+            $ms = $pdo->prepare("SELECT id, name FROM members WHERE mno = ? AND status = 'active'");
+            $ms->execute([$mno]);
+            $member = $ms->fetch();
+
+            if (!$member) {
+                $csvResults[] = ['row' => $mno, 'status' => 'error', 'msg' => 'MNO not found or member inactive'];
+                $skipped++; continue;
+            }
+
+            // Get oldest active loan for this member (applied_at ASC)
+            $lq = $pdo->prepare("SELECT id, amount, duration_months FROM loans
+                WHERE member_id = ? AND status IN ('approved','disbursed','repaying')
+                ORDER BY applied_at ASC LIMIT 1");
+            $lq->execute([$member['id']]);
+            $loan = $lq->fetch();
 
             if (!$loan) {
-                $csvResults[] = ['row' => "Loan #$loanId", 'status' => 'error', 'msg' => 'Loan not found or not active'];
+                $csvResults[] = ['row' => $mno, 'status' => 'error', 'msg' => sanitize($member['name']) . ' — no active loan found'];
                 $skipped++; continue;
             }
 
-            // Validate date
-            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-                $date = date('Y-m-d');
-            }
-
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = date('Y-m-d');
             $validMethods = ['payroll_deduction','bank_transfer','cash'];
             if (!in_array($method, $validMethods)) $method = 'payroll_deduction';
 
             $pdo->prepare("INSERT INTO loan_payments (loan_id, amount, payment_date, payment_method, notes, recorded_by) VALUES (?,?,?,?,?,?)")
-                ->execute([$loanId, $amount, $date, $method, $notes, $_SESSION['user_id']]);
+                ->execute([$loan['id'], $amount, $date, $method, $notes, $_SESSION['user_id']]);
 
-            _updateLoanStatus($pdo, $loanId);
-            $csvResults[] = ['row' => "Loan #$loanId", 'status' => 'success',
-                'msg' => sanitize($loan['mno'] . ' – ' . $loan['name']) . ': ' . formatCurrency($amount) . ' recorded'];
+            _updateLoanStatus($pdo, $loan['id']);
+            $csvResults[] = ['row' => $mno, 'status' => 'success',
+                'msg' => sanitize($member['name']) . ' — Loan #' . $loan['id'] . ': ' . formatCurrency($amount) . ' recorded'];
             $inserted++;
         }
         fclose($handle);
@@ -85,13 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_repayment_csv'])
     }
 }
 
-// Helper: update loan status after payment
+// ── Helper ────────────────────────────────────────────────────────────────────
 function _updateLoanStatus(PDO $pdo, int $loanId): void {
     $row = $pdo->prepare("SELECT amount FROM loans WHERE id=?");
     $row->execute([$loanId]);
-    $total = (float)$row->fetchColumn();
+    $total  = (float)$row->fetchColumn();
     $repaid = getLoanRepaidAmount($pdo, $loanId);
-    if ($repaid >= $total && $total > 0) {
+    if ($total > 0 && $repaid >= $total) {
         $pdo->prepare("UPDATE loans SET status='completed' WHERE id=?")->execute([$loanId]);
     } elseif ($repaid > 0) {
         $pdo->prepare("UPDATE loans SET status='repaying' WHERE id=? AND status IN ('approved','disbursed')")->execute([$loanId]);
@@ -99,13 +105,20 @@ function _updateLoanStatus(PDO $pdo, int $loanId): void {
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
-// Active loans for individual entry dropdown
+// Active members who have at least one active loan
+$activeMembers = $pdo->query("SELECT DISTINCT m.id, m.name, m.mno
+    FROM members m JOIN loans l ON l.member_id = m.id
+    WHERE m.status = 'active' AND l.status IN ('approved','disbursed','repaying')
+    ORDER BY m.name")->fetchAll();
+
+// All active loans with member info (for the JS lookup and reference table)
 $activeLoans = $pdo->query("SELECT l.id, l.loan_type, l.amount, l.duration_months,
+    l.member_id,
     COALESCE((SELECT SUM(amount) FROM loan_payments lp WHERE lp.loan_id=l.id),0) AS repaid,
     m.name AS member_name, m.mno
     FROM loans l JOIN members m ON l.member_id=m.id
     WHERE l.status IN ('approved','disbursed','repaying')
-    ORDER BY m.name, l.id")->fetchAll();
+    ORDER BY m.name, l.applied_at ASC")->fetchAll();
 
 // Recent repayments
 $recentPayments = $pdo->query("SELECT lp.*, m.name AS member_name, m.mno, a.name AS recorded_by_name,
@@ -138,27 +151,30 @@ require_once __DIR__ . '/../../includes/header.php';
         <div class="card-header"><h3 class="card-title"><i class="fas fa-money-bill-wave mr-2"></i>Record Individual Repayment</h3></div>
         <div class="card-body">
             <form method="POST">
+                <!-- Step 1: select member by MNO -->
                 <div class="form-group">
-                    <label class="font-weight-bold">Select Loan <span class="text-danger">*</span></label>
-                    <select name="loan_id" id="loanSelect" class="form-control" required>
-                        <option value="">-- Select Member / Loan --</option>
-                        <?php foreach ($activeLoans as $l):
-                            $bal = $l['amount'] - $l['repaid'];
-                        ?>
-                        <option value="<?= $l['id'] ?>"
-                            data-balance="<?= $bal ?>"
-                            data-monthly="<?= round($l['amount'] / $l['duration_months'], 2) ?>">
-                            <?= sanitize($l['mno']) ?> — <?= sanitize($l['member_name']) ?>
-                            | <?= loanTypeName($l['loan_type']) ?>
-                            | Bal: <?= formatCurrency($bal) ?>
+                    <label class="font-weight-bold">Member (MNO / Name) <span class="text-danger">*</span></label>
+                    <select id="memberSelect" class="form-control" required>
+                        <option value="">-- Select Member --</option>
+                        <?php foreach ($activeMembers as $m): ?>
+                        <option value="<?= $m['id'] ?>">
+                            <?= sanitize($m['mno']) ?> — <?= sanitize($m['name']) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
+                <!-- Step 2: loan auto-populated from member selection -->
+                <div class="form-group" id="loanGroup" style="display:none">
+                    <label class="font-weight-bold">Active Loan <span class="text-danger">*</span></label>
+                    <select name="loan_id" id="loanSelect" class="form-control" required>
+                        <option value="">-- Select Loan --</option>
+                    </select>
+                </div>
+
                 <div id="loanInfo" class="alert alert-info small mb-3" style="display:none">
-                    Outstanding balance: <strong id="loanBalance"></strong> &nbsp;|&nbsp;
-                    Suggested monthly: <strong id="loanMonthly"></strong>
+                    Outstanding balance: <strong id="loanBalance"></strong>
+                    &nbsp;|&nbsp; Suggested monthly: <strong id="loanMonthly"></strong>
                 </div>
 
                 <div class="form-group">
@@ -196,9 +212,9 @@ require_once __DIR__ . '/../../includes/header.php';
 <div class="row">
     <div class="col-md-5">
         <div class="card card-primary">
-            <div class="card-header"><h3 class="card-title"><i class="fas fa-upload mr-2"></i>Bulk Repayment CSV Upload</h3></div>
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-upload mr-2"></i>Bulk Repayment CSV</h3></div>
             <div class="card-body">
-                <p class="text-muted small">Upload repayments for many loans at once from a payroll deduction schedule.</p>
+                <p class="text-muted small">Upload repayments using Member Numbers (MNO). Payment is applied to the member's oldest active loan.</p>
                 <form method="POST" enctype="multipart/form-data">
                     <div class="form-group">
                         <div class="custom-file">
@@ -215,37 +231,42 @@ require_once __DIR__ . '/../../includes/header.php';
                 <h6 class="font-weight-bold">Required CSV Format</h6>
                 <div class="table-responsive">
                 <table class="table table-sm table-bordered small mb-2">
-                    <thead class="thead-light"><tr><th>loan_id</th><th>amount</th><th>payment_date</th><th>payment_method</th><th>notes</th></tr></thead>
+                    <thead class="thead-light">
+                        <tr><th>mno</th><th>amount</th><th>payment_date</th><th>payment_method</th><th>notes</th></tr>
+                    </thead>
                     <tbody>
-                        <tr><td>5</td><td>15000</td><td>2026-06-30</td><td>payroll_deduction</td><td>June</td></tr>
-                        <tr><td>8</td><td>20000</td><td>2026-06-30</td><td>payroll_deduction</td><td></td></tr>
+                        <tr><td>MNO-0001</td><td>15000</td><td>2026-06-30</td><td>payroll_deduction</td><td>June</td></tr>
+                        <tr><td>MNO-0002</td><td>20000</td><td>2026-06-30</td><td>payroll_deduction</td><td></td></tr>
                     </tbody>
                 </table>
                 </div>
                 <ul class="small text-muted pl-3 mb-2">
-                    <li>First row must be a header row (skipped)</li>
-                    <li><strong>loan_id</strong>: the numeric ID from the loans table</li>
+                    <li>First row = header (skipped automatically)</li>
+                    <li><strong>mno</strong>: Member Number e.g. MNO-0001</li>
+                    <li>Payment applied to member's <em>oldest active loan</em> if multiple exist</li>
                     <li><strong>payment_method</strong>: payroll_deduction, bank_transfer, or cash</li>
-                    <li><strong>payment_date</strong> format: YYYY-MM-DD</li>
+                    <li><strong>payment_date</strong>: YYYY-MM-DD</li>
                     <li>notes column is optional</li>
                 </ul>
 
-                <a href="data:text/csv;charset=utf-8,loan_id%2Camount%2Cpayment_date%2Cpayment_method%2Cnotes%0A5%2C15000%2C<?= date('Y-m-d') ?>%2Cpayroll_deduction%2CJune%20salary%0A"
+                <!-- Download template -->
+                <a href="data:text/csv;charset=utf-8,mno%2Camount%2Cpayment_date%2Cpayment_method%2Cnotes%0AMNO-0001%2C15000%2C<?= date('Y-m-d') ?>%2Cpayroll_deduction%2CJune%20salary%0A"
                    download="repayment_template.csv" class="btn btn-sm btn-outline-secondary">
                     <i class="fas fa-download mr-1"></i>Download Template
                 </a>
 
-                <!-- Loan ID reference table -->
+                <!-- MNO Reference -->
                 <hr>
                 <h6 class="font-weight-bold small">Active Loans Reference</h6>
                 <div class="table-responsive" style="max-height:250px;overflow-y:auto">
                 <table class="table table-sm table-bordered small mb-0">
-                    <thead class="thead-light"><tr><th>Loan ID</th><th>Member</th><th>Type</th><th>Balance</th></tr></thead>
+                    <thead class="thead-light"><tr><th>MNO</th><th>Name</th><th>Loan #</th><th>Type</th><th>Balance</th></tr></thead>
                     <tbody>
                     <?php foreach ($activeLoans as $l): ?>
                     <tr>
-                        <td><strong><?= $l['id'] ?></strong></td>
-                        <td><?= sanitize($l['mno']) ?><br><?= sanitize($l['member_name']) ?></td>
+                        <td><strong><?= sanitize($l['mno']) ?></strong></td>
+                        <td><?= sanitize($l['member_name']) ?></td>
+                        <td>#<?= $l['id'] ?></td>
                         <td><small><?= loanTypeName($l['loan_type']) ?></small></td>
                         <td><?= formatCurrency($l['amount'] - $l['repaid']) ?></td>
                     </tr>
@@ -263,7 +284,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <div class="card-header"><h3 class="card-title"><i class="fas fa-clipboard-check mr-2"></i>Import Results</h3></div>
             <div class="card-body p-0" style="max-height:500px;overflow-y:auto">
                 <table class="table table-sm mb-0">
-                    <thead class="thead-light"><tr><th>Loan</th><th>Result</th></tr></thead>
+                    <thead class="thead-light"><tr><th>MNO</th><th>Result</th></tr></thead>
                     <tbody>
                     <?php foreach ($csvResults as $r): ?>
                     <tr class="<?= $r['status'] === 'success' ? 'table-success' : 'table-danger' ?>">
@@ -298,20 +319,21 @@ require_once __DIR__ . '/../../includes/header.php';
         <div class="table-responsive">
         <table class="table table-sm table-hover mb-0">
             <thead class="thead-light">
-                <tr><th>#</th><th>Loan #</th><th>Member</th><th>Type</th><th>Amount</th><th>Date</th><th>Method</th><th>Notes</th><th>Recorded By</th></tr>
+                <tr><th>#</th><th>MNO</th><th>Member</th><th>Loan #</th><th>Type</th><th>Amount</th><th>Date</th><th>Method</th><th>Notes</th><th>By</th></tr>
             </thead>
             <tbody>
             <?php if (empty($recentPayments)): ?>
-            <tr><td colspan="9" class="text-center text-muted py-4">No repayments recorded yet.</td></tr>
+            <tr><td colspan="10" class="text-center text-muted py-4">No repayments recorded yet.</td></tr>
             <?php else: foreach ($recentPayments as $i => $p): ?>
             <tr>
                 <td><?= $i + 1 ?></td>
-                <td><strong>#<?= $p['loan_id'] ?></strong></td>
-                <td><?= sanitize($p['member_name']) ?><br><small class="text-muted"><?= sanitize($p['mno']) ?></small></td>
+                <td><strong><?= sanitize($p['mno']) ?></strong></td>
+                <td><?= sanitize($p['member_name']) ?></td>
+                <td>#<?= $p['loan_id'] ?></td>
                 <td><small><?= loanTypeName($p['loan_type']) ?></small></td>
                 <td class="text-success font-weight-bold"><?= formatCurrency($p['amount']) ?></td>
                 <td><?= date('M d, Y', strtotime($p['payment_date'])) ?></td>
-                <td><span class="badge badge-secondary"><?= ucwords(str_replace('_',' ',$p['payment_method'])) ?></span></td>
+                <td><small><?= ucwords(str_replace('_',' ',$p['payment_method'])) ?></small></td>
                 <td><small><?= sanitize($p['notes'] ?? '—') ?></small></td>
                 <td><small><?= sanitize($p['recorded_by_name'] ?? 'System') ?></small></td>
             </tr>
@@ -326,6 +348,44 @@ require_once __DIR__ . '/../../includes/header.php';
 </div><!-- end tab-content -->
 
 <script>
+// Build loan lookup keyed by member_id
+var loansByMember = {};
+<?php foreach ($activeLoans as $l):
+    $bal = $l['amount'] - $l['repaid'];
+    $monthly = round($l['amount'] / $l['duration_months'], 2);
+?>
+if (!loansByMember[<?= $l['member_id'] ?>]) loansByMember[<?= $l['member_id'] ?>] = [];
+loansByMember[<?= $l['member_id'] ?>].push({
+    id:      <?= $l['id'] ?>,
+    type:    "<?= addslashes(loanTypeName($l['loan_type'])) ?>",
+    balance: <?= $bal ?>,
+    monthly: <?= $monthly ?>
+});
+<?php endforeach; ?>
+
+$('#memberSelect').on('change', function() {
+    var mid   = $(this).val();
+    var loans = loansByMember[mid] || [];
+    var $sel  = $('#loanSelect');
+
+    $sel.empty().append('<option value="">-- Select Loan --</option>');
+    loans.forEach(function(l) {
+        $sel.append(
+            '<option value="' + l.id + '" data-balance="' + l.balance + '" data-monthly="' + l.monthly + '">' +
+            'Loan #' + l.id + ' — ' + l.type + ' | Bal: ₦' + l.balance.toLocaleString() +
+            '</option>'
+        );
+    });
+
+    if (loans.length === 1) {
+        $sel.val(loans[0].id).trigger('change'); // auto-select if only one loan
+    }
+
+    $('#loanGroup').toggle(loans.length > 0);
+    $('#loanInfo').hide();
+    $('#repayAmount').val('').removeAttr('max');
+});
+
 $('#loanSelect').on('change', function() {
     var opt = $(this).find(':selected');
     var bal = parseFloat(opt.data('balance')) || 0;
@@ -340,6 +400,7 @@ $('#loanSelect').on('change', function() {
         $('#repayAmount').val('').removeAttr('max');
     }
 });
+
 $('.custom-file-input').on('change', function() {
     var n = $(this).val().split('\\').pop();
     $(this).siblings('.custom-file-label').text(n || 'Choose CSV file...');

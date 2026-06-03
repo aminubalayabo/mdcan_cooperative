@@ -26,10 +26,27 @@ $stmt = $pdo->prepare("SELECT * FROM members WHERE id=?");
 $stmt->execute([$memberId]);
 $member = $stmt->fetch();
 
-// Recent loans
-$stmt = $pdo->prepare("SELECT * FROM loans WHERE member_id=? ORDER BY applied_at DESC LIMIT 5");
+// All loans with repayment totals
+$stmt = $pdo->prepare("SELECT l.*,
+    COALESCE((SELECT SUM(amount) FROM loan_payments lp WHERE lp.loan_id=l.id), 0) AS total_repaid,
+    ROUND(l.amount / l.duration_months, 2) AS monthly_instalment
+    FROM loans l WHERE l.member_id=? ORDER BY l.applied_at DESC");
 $stmt->execute([$memberId]);
-$recentLoans = $stmt->fetchAll();
+$allLoans = $stmt->fetchAll();
+
+// Loan summary totals (only active/disbursed loans count as outstanding)
+$loanSummary = ['total_borrowed' => 0, 'total_repaid' => 0, 'total_balance' => 0];
+foreach ($allLoans as $l) {
+    if (in_array($l['status'], ['approved','disbursed','repaying','completed'])) {
+        $loanSummary['total_borrowed'] += $l['amount'];
+        $loanSummary['total_repaid']   += $l['total_repaid'];
+        $bal = max(0, $l['amount'] - $l['total_repaid']);
+        if ($l['status'] !== 'completed') {
+            $loanSummary['total_balance'] += $bal;
+        }
+    }
+}
+$recentLoans = array_slice($allLoans, 0, 5);
 
 // Recent savings
 $stmt = $pdo->prepare("SELECT * FROM savings WHERE member_id=? ORDER BY created_at DESC LIMIT 5");
@@ -83,6 +100,71 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- ── Loan Summary ──────────────────────────────────────────────────────── -->
+<?php if (!empty($allLoans)): ?>
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title"><i class="fas fa-chart-line mr-2"></i>My Loan Summary</h3>
+        <a href="<?= BASE_URL ?>/member/loans.php" class="btn btn-sm btn-outline-primary">Full Details</a>
+    </div>
+    <div class="card-body pb-2">
+        <!-- Totals row -->
+        <div class="row text-center mb-3">
+            <div class="col-4">
+                <div class="p-3 rounded" style="background:#f0f6ff">
+                    <div class="text-muted small">Total Borrowed</div>
+                    <div class="font-weight-bold text-primary h5 mb-0"><?= formatCurrency($loanSummary['total_borrowed']) ?></div>
+                </div>
+            </div>
+            <div class="col-4">
+                <div class="p-3 rounded" style="background:#f0fff4">
+                    <div class="text-muted small">Total Repaid</div>
+                    <div class="font-weight-bold text-success h5 mb-0"><?= formatCurrency($loanSummary['total_repaid']) ?></div>
+                </div>
+            </div>
+            <div class="col-4">
+                <div class="p-3 rounded" style="background:#fff5f5">
+                    <div class="text-muted small">Outstanding Balance</div>
+                    <div class="font-weight-bold text-danger h5 mb-0"><?= formatCurrency($loanSummary['total_balance']) ?></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-loan breakdown -->
+        <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="thead-light">
+                <tr><th>Type</th><th>Amount</th><th>Monthly</th><th>Repaid</th><th>Balance</th><th>Progress</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($allLoans as $l):
+                $bal      = max(0, $l['amount'] - $l['total_repaid']);
+                $pct      = $l['amount'] > 0 ? min(100, round(($l['total_repaid'] / $l['amount']) * 100)) : 0;
+                $barColor = $pct >= 100 ? 'success' : ($pct >= 50 ? 'info' : 'warning');
+                if (!in_array($l['status'], ['approved','disbursed','repaying','completed'])) continue;
+            ?>
+            <tr>
+                <td><small><?= loanTypeName($l['loan_type']) ?></small></td>
+                <td><?= formatCurrency($l['amount']) ?></td>
+                <td><small class="text-info"><?= formatCurrency($l['monthly_instalment']) ?></small></td>
+                <td class="text-success"><?= formatCurrency($l['total_repaid']) ?></td>
+                <td class="<?= $bal > 0 ? 'text-danger' : 'text-success' ?> font-weight-bold"><?= formatCurrency($bal) ?></td>
+                <td style="min-width:100px">
+                    <div class="progress" style="height:10px" title="<?= $pct ?>% repaid">
+                        <div class="progress-bar bg-<?= $barColor ?>" style="width:<?= $pct ?>%"></div>
+                    </div>
+                    <small class="text-muted"><?= $pct ?>%</small>
+                </td>
+                <td><?= statusBadge($l['status']) ?></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="row">
     <!-- Member Profile -->
