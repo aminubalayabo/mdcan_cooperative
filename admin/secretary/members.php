@@ -157,11 +157,16 @@ if (isset($_GET['toggle_status'], $_GET['id'])) {
 
 // Data
 $pending = $pdo->query("SELECT * FROM members WHERE status='pending_secretary' ORDER BY created_at ASC")->fetchAll();
+
+$rejectedMembers = $pdo->query("SELECT * FROM members WHERE status='rejected' ORDER BY updated_at DESC")->fetchAll();
+
 $allMembers = $pdo->query("SELECT m.*,
     (SELECT COALESCE(SUM(amount),0) FROM savings s WHERE s.member_id=m.id) AS total_savings
-    FROM members m WHERE m.status NOT IN ('pending_secretary')
+    FROM members m WHERE m.status NOT IN ('pending_secretary','rejected')
     ORDER BY m.created_at DESC")->fetchAll();
-$pendingCount = count($pending);
+
+$pendingCount  = count($pending);
+$rejectedCount = count($rejectedMembers);
 
 require_once __DIR__ . '/../../includes/header.php';
 ?>
@@ -173,6 +178,14 @@ require_once __DIR__ . '/../../includes/header.php';
             <i class="fas fa-clock mr-1"></i>Pending Applications
             <?php if ($pendingCount): ?>
             <span class="badge badge-danger ml-1"><?= $pendingCount ?></span>
+            <?php endif; ?>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'rejected' ? 'active' : '' ?>" href="?tab=rejected">
+            <i class="fas fa-times-circle mr-1"></i>Rejected
+            <?php if ($rejectedCount): ?>
+            <span class="badge badge-secondary ml-1"><?= $rejectedCount ?></span>
             <?php endif; ?>
         </a>
     </li>
@@ -253,6 +266,43 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 <?php endforeach; ?>
+<?php endif; ?>
+
+<!-- ══ TAB: REJECTED ═════════════════════════════════════════════════════════ -->
+<?php elseif ($tab === 'rejected'): ?>
+
+<?php if (empty($rejectedMembers)): ?>
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="fas fa-check-circle fa-3x text-success mb-3"></i><br>No rejected applications on record.
+</div></div>
+<?php else: ?>
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-times-circle text-danger mr-2"></i>Rejected Applications (<?= $rejectedCount ?>)</h3>
+        <div class="card-tools"><small class="text-muted">Rejection decisions can be overturned by the Director.</small></div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="thead-light">
+                <tr><th>#</th><th>Name</th><th>Email</th><th>Department</th><th>Applied</th><th>Rejection Reason</th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($rejectedMembers as $i => $m): ?>
+            <tr>
+                <td><?= $i + 1 ?></td>
+                <td><strong><?= sanitize($m['name']) ?></strong><br><small class="text-muted"><?= sanitize($m['gsm']) ?></small></td>
+                <td><small><?= sanitize($m['email']) ?></small></td>
+                <td><?= sanitize($m['department']) ?></td>
+                <td><small><?= $m['registration_date'] ? date('M d, Y', strtotime($m['registration_date'])) : '—' ?></small></td>
+                <td><span class="text-danger small"><i class="fas fa-quote-left fa-xs mr-1"></i><?= sanitize($m['rejection_reason'] ?? '—') ?></span></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <!-- ══ TAB: ALL MEMBERS ══════════════════════════════════════════════════════ -->

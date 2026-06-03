@@ -100,19 +100,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_member'])) {
     exit;
 }
 
+// ── Reconsider (reset rejected back to pending_secretary) ─────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reconsider_member'])) {
+    $memberId = (int)($_POST['member_id'] ?? 0);
+    $pdo->prepare("UPDATE members SET status='pending_secretary', rejection_reason=NULL, forwarded_by=NULL, forwarded_at=NULL WHERE id=? AND status='rejected'")
+        ->execute([$memberId]);
+
+    $stmt = $pdo->prepare("SELECT * FROM members WHERE id=?");
+    $stmt->execute([$memberId]);
+    $member = $stmt->fetch();
+
+    if ($member) {
+        // Notify secretaries that the application needs re-review
+        $secs = $pdo->query("SELECT * FROM admins WHERE role='secretary' AND is_active=1")->fetchAll();
+        foreach ($secs as $sec) {
+            addNotification($pdo, $sec['id'], 'admin', 'Application Sent for Re-review',
+                $member['name'] . "'s membership application has been returned for re-review by the Director.",
+                'warning', BASE_URL . '/admin/secretary/members.php?tab=pending');
+        }
+        logAudit($pdo, $_SESSION['user_id'], 'admin', 'membership_reconsidered', "Member ID: $memberId returned to Secretary");
+        flashMessage('success', $member['name'] . "'s application has been returned to the Secretary for re-review.");
+    }
+    header('Location: ' . BASE_URL . '/admin/director/members.php?tab=rejected');
+    exit;
+}
+
 // Data
 $pendingMembers = $pdo->query("SELECT m.*, a.name AS forwarded_by_name
     FROM members m LEFT JOIN admins a ON m.forwarded_by = a.id
     WHERE m.status = 'pending_director'
     ORDER BY m.forwarded_at ASC")->fetchAll();
 
-$pendingCount = count($pendingMembers);
+$rejectedMembers = $pdo->query("SELECT m.*, a.name AS forwarded_by_name
+    FROM members m LEFT JOIN admins a ON m.forwarded_by = a.id
+    WHERE m.status = 'rejected'
+    ORDER BY m.updated_at DESC")->fetchAll();
+
+$pendingCount  = count($pendingMembers);
+$rejectedCount = count($rejectedMembers);
 
 $allMembers = $pdo->query("SELECT m.*,
     (SELECT COALESCE(SUM(amount),0) FROM savings s WHERE s.member_id=m.id) AS total_savings,
     (SELECT COUNT(*) FROM loans l WHERE l.member_id=m.id AND l.status IN ('approved','disbursed','repaying')) AS active_loans
     FROM members m
-    WHERE m.status NOT IN ('pending_secretary','pending_director')
+    WHERE m.status NOT IN ('pending_secretary','pending_director','rejected')
     ORDER BY m.created_at DESC")->fetchAll();
 
 require_once __DIR__ . '/../../includes/header.php';
@@ -125,6 +156,14 @@ require_once __DIR__ . '/../../includes/header.php';
             <i class="fas fa-gavel mr-1"></i>Awaiting Approval
             <?php if ($pendingCount): ?>
             <span class="badge badge-danger ml-1"><?= $pendingCount ?></span>
+            <?php endif; ?>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab==='rejected'?'active':'' ?>" href="?tab=rejected">
+            <i class="fas fa-times-circle mr-1"></i>Rejected
+            <?php if ($rejectedCount): ?>
+            <span class="badge badge-secondary ml-1"><?= $rejectedCount ?></span>
             <?php endif; ?>
         </a>
     </li>
@@ -209,6 +248,61 @@ require_once __DIR__ . '/../../includes/header.php';
 <?php endforeach; ?>
 <?php endif; ?>
 
+<!-- ══ REJECTED APPLICATIONS ═════════════════════════════════════════════════ -->
+<?php elseif ($tab === 'rejected'): ?>
+
+<?php if (empty($rejectedMembers)): ?>
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="fas fa-check-circle fa-3x text-success mb-3"></i><br>
+    No rejected applications on record.
+</div></div>
+<?php else: ?>
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-times-circle text-danger mr-2"></i>Rejected Membership Applications (<?= $rejectedCount ?>)</h3>
+        <div class="card-tools">
+            <small class="text-muted">Use <strong>Reconsider</strong> to send an application back to the Secretary for re-review.</small>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="thead-light">
+                <tr><th>#</th><th>Name</th><th>Dept</th><th>Email</th><th>Reviewed By</th><th>Rejection Reason</th><th>Date</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+            <?php foreach ($rejectedMembers as $i => $m): ?>
+            <tr>
+                <td><?= $i + 1 ?></td>
+                <td>
+                    <strong><?= sanitize($m['name']) ?></strong><br>
+                    <small class="text-muted"><?= sanitize($m['gsm']) ?></small>
+                </td>
+                <td><?= sanitize($m['department']) ?></td>
+                <td><small><?= sanitize($m['email']) ?></small></td>
+                <td><small><?= sanitize($m['forwarded_by_name'] ?? '—') ?></small></td>
+                <td>
+                    <span class="text-danger small">
+                        <i class="fas fa-quote-left fa-xs mr-1 opacity-50"></i>
+                        <?= sanitize($m['rejection_reason'] ?? '—') ?>
+                    </span>
+                </td>
+                <td><small><?= $m['updated_at'] ? date('M d, Y', strtotime($m['updated_at'])) : '—' ?></small></td>
+                <td>
+                    <button class="btn btn-xs btn-warning" data-toggle="modal" data-target="#reconsiderModal"
+                        data-id="<?= $m['id'] ?>" data-name="<?= sanitize($m['name']) ?>">
+                        <i class="fas fa-redo mr-1"></i>Reconsider
+                    </button>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- ══ ALL MEMBERS ═══════════════════════════════════════════════════════════ -->
 <?php elseif ($tab === 'all'): ?>
 
@@ -271,11 +365,41 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 
+<!-- Reconsider Modal -->
+<div class="modal fade" id="reconsiderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <input type="hidden" name="member_id" id="reconsider_member_id">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title"><i class="fas fa-redo mr-2"></i>Reconsider Application</h5>
+                    <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <p>You are returning <strong id="reconsider_name"></strong>'s application to the Secretary for re-review.</p>
+                    <p class="text-muted small">The Secretary will be notified and can re-evaluate before forwarding again. The previous rejection reason will be cleared.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" name="reconsider_member" class="btn btn-warning">
+                        <i class="fas fa-redo mr-1"></i>Send Back for Re-review
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
 $('#rejectModal').on('show.bs.modal', function(e) {
     var btn = $(e.relatedTarget);
     $('#reject_member_id').val(btn.data('id'));
     $('#reject_name').text(btn.data('name'));
+});
+$('#reconsiderModal').on('show.bs.modal', function(e) {
+    var btn = $(e.relatedTarget);
+    $('#reconsider_member_id').val(btn.data('id'));
+    $('#reconsider_name').text(btn.data('name'));
 });
 </script>
 
