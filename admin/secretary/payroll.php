@@ -8,11 +8,16 @@ $pageTitle = 'Payroll Export';
 $monthYear = $_GET['month'] ?? date('Y-m');
 
 // Build payroll data
+// loan_deduction = expected monthly instalment (loan_amount / duration_months)
+// summed across all active loans for each member
 $stmt = $pdo->prepare("SELECT m.id, m.mno, m.name, m.department, m.bank_name, m.account_number,
     COALESCE((SELECT SUM(s.amount) FROM savings s WHERE s.member_id = m.id AND s.month_year = ?), 0) AS savings_this_month,
-    COALESCE((SELECT SUM(lp.amount) FROM loan_payments lp JOIN loans l ON lp.loan_id = l.id WHERE l.member_id = m.id AND DATE_FORMAT(lp.payment_date,'%Y-%m') = ?), 0) AS loan_deduction
+    COALESCE((SELECT SUM(ROUND(l.amount / l.duration_months, 2))
+              FROM loans l
+              WHERE l.member_id = m.id
+                AND l.status IN ('approved','disbursed','repaying')), 0) AS loan_deduction
     FROM members m WHERE m.status = 'active' ORDER BY m.mno");
-$stmt->execute([$monthYear, $monthYear]);
+$stmt->execute([$monthYear]);
 $payrollData = $stmt->fetchAll();
 
 $totals = ['savings' => 0, 'loan_deduction' => 0, 'total_deduction' => 0];
