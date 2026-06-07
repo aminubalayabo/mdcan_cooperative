@@ -5,8 +5,14 @@ config/db.local.php
 # Uploaded files (keep folder structure, not content)
 uploads/guarantors/*
 uploads/documents/*
+uploads/payslips/*
 !uploads/guarantors/.gitkeep
 !uploads/documents/.gitkeep
+!uploads/payslips/.gitkeep
+
+# Debug / setup scripts (local only)
+check_db1.php
+setup11.php
 
 # OS / editor junk
 .DS_Store
@@ -18,3 +24,7 @@ Thumbs.db
 # PHP error logs
 *.log
 error_log
+
+# Keep logs folder but not content
+logs/*
+!logs/.gitkeep

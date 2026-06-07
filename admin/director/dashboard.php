@@ -12,7 +12,22 @@ $stmt = $pdo->query("SELECT COUNT(*) FROM loans WHERE status='under_review'"); $
 $stmt = $pdo->query("SELECT COUNT(*) FROM loans WHERE status='approved'"); $approvedLoans = (int)$stmt->fetchColumn();
 $stmt = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM savings"); $totalSavings = (float)$stmt->fetchColumn();
 $stmt = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM loans WHERE status IN ('disbursed','repaying')"); $totalDisbursed = (float)$stmt->fetchColumn();
-$stmt = $pdo->query("SELECT COUNT(*) FROM savings_withdrawals WHERE status='pending'"); $pendingWithdrawals = (int)$stmt->fetchColumn();
+$stmt = $pdo->query("SELECT COUNT(*) FROM savings_withdrawals WHERE status='under_review'"); $pendingWithdrawals = (int)$stmt->fetchColumn();
+
+// Shares summary: per-member savings as share of total
+$sharesData = $pdo->query("SELECT m.mno, m.name,
+    COALESCE(SUM(s.amount),0) AS member_savings
+    FROM members m
+    LEFT JOIN savings s ON s.member_id = m.id
+    WHERE m.status = 'active'
+    GROUP BY m.id
+    HAVING member_savings > 0
+    ORDER BY member_savings DESC LIMIT 10")->fetchAll();
+
+// Last dividend generation
+$lastDividend = $pdo->query("SELECT dr.*, a.name AS generated_by_name
+    FROM dividend_records dr JOIN admins a ON dr.generated_by = a.id
+    ORDER BY dr.generated_at DESC LIMIT 1")->fetch();
 
 // Loans awaiting director approval
 $loansPending = $pdo->query("SELECT l.*, m.name AS member_name, m.mno, m.department
@@ -179,6 +194,100 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="card-footer text-center">
                 <a href="<?= BASE_URL ?>/admin/director/audit_logs.php" class="btn btn-sm btn-default">View All Logs</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Shares Summary ──────────────────────────────────────────────────────── -->
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <h3 class="card-title mb-0">
+                    <i class="fas fa-chart-pie mr-2"></i>Members' Shares Summary
+                    <small class="ml-2" style="font-size:13px">(Shares = Savings Balance)</small>
+                </h3>
+                <span class="badge badge-light">Top 10</span>
+            </div>
+            <div class="card-body p-0">
+                <?php if (empty($sharesData)): ?>
+                <div class="p-4 text-center text-muted">No savings recorded yet.</div>
+                <?php else: ?>
+                <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>#</th>
+                            <th>MN No</th>
+                            <th>Member</th>
+                            <th>Share Value (Savings)</th>
+                            <th>% of Total</th>
+                            <th>Share Bar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($sharesData as $i => $s):
+                        $pct = $totalSavings > 0 ? ($s['member_savings'] / $totalSavings) * 100 : 0;
+                    ?>
+                    <tr>
+                        <td><?= $i + 1 ?></td>
+                        <td><strong><?= sanitize($s['mno']) ?></strong></td>
+                        <td><?= sanitize($s['name']) ?></td>
+                        <td class="font-weight-bold text-success"><?= formatCurrency($s['member_savings']) ?></td>
+                        <td><span class="badge badge-info"><?= number_format($pct, 2) ?>%</span></td>
+                        <td style="min-width:120px">
+                            <div class="progress" style="height:10px">
+                                <div class="progress-bar bg-success" style="width:<?= min(100, $pct) ?>%"
+                                    title="<?= number_format($pct, 2) ?>%"></div>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                    <tfoot class="bg-light font-weight-bold">
+                        <tr>
+                            <td colspan="3" class="text-right">Total Cooperative Shares:</td>
+                            <td class="text-success"><?= formatCurrency($totalSavings) ?></td>
+                            <td>100%</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card card-success">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-percentage mr-2"></i>Dividend History</h3></div>
+            <div class="card-body">
+                <?php if ($lastDividend): ?>
+                <div class="info-box bg-success mb-3">
+                    <span class="info-box-icon"><i class="fas fa-hand-holding-usd"></i></span>
+                    <div class="info-box-content">
+                        <span class="info-box-text">Last Dividend (<?= $lastDividend['year'] ?>)</span>
+                        <span class="info-box-number"><?= formatCurrency($lastDividend['appropriated_amount']) ?></span>
+                        <span class="progress-description">
+                            <?= $lastDividend['members_count'] ?> members &bull;
+                            <?= date('M d, Y', strtotime($lastDividend['generated_at'])) ?>
+                        </span>
+                    </div>
+                </div>
+                <ul class="list-unstyled small text-muted">
+                    <li><i class="fas fa-calendar mr-1"></i> Year: <strong><?= $lastDividend['year'] ?></strong></li>
+                    <li><i class="fas fa-piggy-bank mr-1"></i> Total Savings at Time: <?= formatCurrency($lastDividend['total_savings']) ?></li>
+                    <li><i class="fas fa-users mr-1"></i> Members Shared: <?= $lastDividend['members_count'] ?></li>
+                    <li><i class="fas fa-user-shield mr-1"></i> Generated by: <?= sanitize($lastDividend['generated_by_name']) ?></li>
+                </ul>
+                <?php else: ?>
+                <div class="text-center text-muted py-3">
+                    <i class="fas fa-percentage fa-2x mb-2"></i><br>
+                    No dividend has been generated yet.
+                </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>

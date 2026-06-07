@@ -31,8 +31,8 @@ function isAdmin(): bool     { return isDirector() || isSecretary(); }
 
 // ── Output / formatting ───────────────────────────────────────────────────────
 
-function sanitize(string $input): string {
-    return htmlspecialchars(strip_tags(trim($input)), ENT_QUOTES, 'UTF-8');
+function sanitize(?string $input): string {
+    return htmlspecialchars(strip_tags(trim($input ?? '')), ENT_QUOTES, 'UTF-8');
 }
 
 function formatCurrency(float|string $amount): string {
@@ -49,18 +49,21 @@ function timeAgo(string $datetime): string {
 
 function statusBadge(string $status): string {
     $map = [
-        'pending'       => 'warning',
-        'under_review'  => 'info',
-        'approved'      => 'success',
-        'declined'      => 'danger',
-        'disbursed'     => 'primary',
-        'repaying'      => 'primary',
-        'completed'     => 'secondary',
-        'active'        => 'success',
-        'inactive'      => 'secondary',
-        'suspended'     => 'danger',
-        'processed'     => 'success',
-        'accepted'      => 'success',
+        'pending'            => 'warning',
+        'under_review'       => 'info',
+        'approved'           => 'success',
+        'declined'           => 'danger',
+        'disbursed'          => 'primary',
+        'repaying'           => 'primary',
+        'completed'          => 'secondary',
+        'active'             => 'success',
+        'inactive'           => 'secondary',
+        'suspended'          => 'danger',
+        'processed'          => 'success',
+        'accepted'           => 'success',
+        'pending_secretary'  => 'warning',
+        'pending_director'   => 'info',
+        'rejected'           => 'danger',
     ];
     $color = $map[$status] ?? 'secondary';
     return '<span class="badge badge-' . $color . '">' . ucfirst(str_replace('_', ' ', $status)) . '</span>';
@@ -143,9 +146,18 @@ function generateToken(int $length = 32): string {
 }
 
 function generateMNO(PDO $pdo): string {
-    $stmt = $pdo->query("SELECT COUNT(*) FROM members");
+    // Base on count of approved/active members only; pad to avoid collisions
+    $stmt  = $pdo->query("SELECT COUNT(*) FROM members WHERE status NOT IN ('pending_secretary','pending_director','rejected')");
     $count = (int)$stmt->fetchColumn() + 1;
-    return 'MNO-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+    // Ensure uniqueness in case of gaps
+    do {
+        $mno = 'MNO-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+        $chk = $pdo->prepare("SELECT id FROM members WHERE mno = ?");
+        $chk->execute([$mno]);
+        if (!$chk->fetch()) break;
+        $count++;
+    } while (true);
+    return $mno;
 }
 
 function getMemberSavingsTotal(PDO $pdo, int $memberId): float {

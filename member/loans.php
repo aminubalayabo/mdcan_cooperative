@@ -26,20 +26,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['apply_loan'])) {
     if (loanNeedsGuarantor($loanType) && !$guarantorId) $errors[] = 'A guarantor is required for this loan type.';
     if ($guarantorId === $memberId) $errors[] = 'You cannot be your own guarantor.';
 
+    // Handle payslip upload
+    $payslipPath = '';
+    if (!empty($_FILES['payslip']['name'])) {
+        $allowedExt = ['pdf', 'jpg', 'jpeg', 'png'];
+        $ext = strtolower(pathinfo($_FILES['payslip']['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowedExt)) {
+            $errors[] = 'Payslip must be PDF, JPG, or PNG.';
+        } else {
+            $filename = 'payslip_' . uniqid() . '.' . $ext;
+            $dest = __DIR__ . '/../uploads/payslips/' . $filename;
+            if (move_uploaded_file($_FILES['payslip']['tmp_name'], $dest)) {
+                $payslipPath = $filename;
+            } else {
+                $errors[] = 'Failed to upload payslip. Please try again.';
+            }
+        }
+    }
+
     if (empty($errors)) {
         $pdo->beginTransaction();
         try {
             $interestRate = loanInterestRate($loanType);
             $needsGuarantor = loanNeedsGuarantor($loanType) ? 1 : 0;
 
-            $stmt = $pdo->prepare("INSERT INTO loans (member_id,loan_type,amount,duration_months,interest_rate,purpose,requires_guarantor) VALUES (?,?,?,?,?,?,?)");
-            $stmt->execute([$memberId, $loanType, $amount, $months, $interestRate, $purpose, $needsGuarantor]);
+            $stmt = $pdo->prepare("INSERT INTO loans (member_id,loan_type,amount,duration_months,interest_rate,purpose,payslip,requires_guarantor) VALUES (?,?,?,?,?,?,?,?)");
+            $stmt->execute([$memberId, $loanType, $amount, $months, $interestRate, $purpose, $payslipPath ?: null, $needsGuarantor]);
             $loanId = $pdo->lastInsertId();
 
             if ($needsGuarantor && $guarantorId) {
                 $token = generateToken();
                 $stmt2 = $pdo->prepare("INSERT INTO loan_guarantors (loan_id,guarantor_member_id,consent_token) VALUES (?,?,?)");
                 $stmt2->execute([$loanId, $guarantorId, $token]);
+
+                // Fetch guarantor details for notification + email
+                $gRow = $pdo->prepare("SELECT id, name, email FROM members WHERE id=?");
+                $gRow->execute([$guarantorId]);
+                $gMember = $gRow->fetch();
+
+                if ($gMember) {
+                    // In-app notification
+                    addNotification($pdo, $gMember['id'], 'member', 'Guarantor Request',
+                        $_SESSION['user_name'] . ' has selected you as guarantor for a ' . loanTypeName($loanType) . ' of ' . formatCurrency($amount) . '. Please respond on your dashboard.',
+                        'warning', BASE_URL . '/member/dashboard.php');
+
+                    // Email to guarantor
+                    require_once __DIR__ . '/../includes/mailer.php';
+                    $emailHtml = emailGuarantorRequest(
+                        $gMember['name'],
+                        $_SESSION['user_name'],
+                        loanTypeName($loanType),
+                        $amount,
+                        $months
+                    );
+                    sendMdcanEmail($gMember['email'], $gMember['name'], 'Guarantor Request – MDCAN Cooperative', $emailHtml);
+                }
             }
 
             logAudit($pdo, $memberId, 'member', 'loan_applied', "Loan ID $loanId, type $loanType, amount $amount");
@@ -90,7 +131,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php foreach ($errors as $e): ?>
                 <div class="alert alert-danger py-2 small"><i class="fas fa-exclamation-circle mr-1"></i><?= sanitize($e) ?></div>
                 <?php endforeach; ?>
-                <form method="POST" action="">
+                <form method="POST" action="" enctype="multipart/form-data">
                     <div class="form-group">
                         <label>Loan Type <span class="text-danger">*</span></label>
                         <select name="loan_type" id="loan_type" class="form-control" required>
@@ -115,6 +156,11 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="form-group">
                         <label>Purpose</label>
                         <textarea name="purpose" class="form-control" rows="3" placeholder="Brief description of loan purpose"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Current Payslip <span class="text-danger">*</span></label>
+                        <input type="file" name="payslip" class="form-control-file" accept=".pdf,.jpg,.jpeg,.png" required>
+                        <small class="text-muted">PDF, JPG, or PNG — required for processing your application</small>
                     </div>
                     <div id="guarantor_section" class="form-group">
                         <label>Guarantor <span class="text-danger">*</span></label>

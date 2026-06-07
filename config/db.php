@@ -1,10 +1,17 @@
 <?php
+ob_start();
+
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'mdcan_cooperative');
 define('DB_USER', 'root');
 define('DB_PASS', '');
 
-define('BASE_URL', 'http://localhost/mdcan_cooperative');
+// Auto-detect protocol and host (includes port, e.g. localhost:8080)
+$_proto   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$_host    = $_SERVER['HTTP_HOST'] ?? 'localhost';
+define('BASE_URL', $_proto . '://' . $_host . '/mdcan_cooperative');
+unset($_proto, $_host);
+
 define('APP_NAME', 'MDCAN Cooperative System');
 define('APP_VERSION', '1.0.0');
 

@@ -28,7 +28,7 @@ CREATE TABLE admins (
 -- ------------------------------------------------------------
 CREATE TABLE members (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    mno VARCHAR(20) UNIQUE NOT NULL COMMENT 'Member Number',
+    mno VARCHAR(20) UNIQUE NULL DEFAULT NULL COMMENT 'Assigned after Director approval',
     name VARCHAR(100) NOT NULL,
     department VARCHAR(100),
     gsm VARCHAR(20),
@@ -39,7 +39,10 @@ CREATE TABLE members (
     next_of_kin VARCHAR(100),
     next_of_kin_gsm VARCHAR(20),
     registration_date DATE,
-    status ENUM('active','inactive','suspended') DEFAULT 'active',
+    status ENUM('pending_secretary','pending_director','active','inactive','suspended','rejected') NOT NULL DEFAULT 'pending_secretary',
+    rejection_reason TEXT DEFAULT NULL,
+    forwarded_by INT DEFAULT NULL COMMENT 'Secretary who forwarded to Director',
+    forwarded_at TIMESTAMP NULL DEFAULT NULL,
     profile_photo VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -56,6 +59,7 @@ CREATE TABLE loans (
     duration_months INT NOT NULL,
     interest_rate DECIMAL(5,2) DEFAULT 0.00,
     purpose TEXT,
+    payslip VARCHAR(255) DEFAULT NULL,
     status ENUM('pending','under_review','approved','declined','disbursed','repaying','completed') DEFAULT 'pending',
     requires_guarantor TINYINT(1) DEFAULT 1,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -108,7 +112,7 @@ CREATE TABLE savings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     member_id INT NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
-    type ENUM('monthly','flexible','payroll') DEFAULT 'monthly',
+    type ENUM('monthly','flexible','payroll','withdrawal') DEFAULT 'monthly',
     month_year VARCHAR(7) COMMENT 'Format: YYYY-MM',
     description TEXT,
     recorded_by INT DEFAULT NULL,
@@ -127,10 +131,11 @@ CREATE TABLE savings_withdrawals (
     withdrawal_type ENUM('account_closure','loan_liquidation','cash_withdrawal') NOT NULL,
     reason TEXT,
     supporting_document VARCHAR(255),
-    status ENUM('pending','approved','declined','processed') DEFAULT 'pending',
+    status ENUM('pending','under_review','approved','declined','processed') DEFAULT 'pending',
     requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     reviewed_by INT DEFAULT NULL,
     reviewed_at TIMESTAMP NULL DEFAULT NULL,
+    review_notes TEXT DEFAULT NULL,
     approved_by INT DEFAULT NULL,
     approved_at TIMESTAMP NULL DEFAULT NULL,
     processed_at TIMESTAMP NULL DEFAULT NULL,
@@ -192,19 +197,17 @@ CREATE TABLE member_shares (
 );
 
 -- ------------------------------------------------------------
--- Dividends
+-- Dividend Records (year-end appropriation log)
 -- ------------------------------------------------------------
-CREATE TABLE dividends (
+CREATE TABLE dividend_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    member_id INT NOT NULL,
-    amount DECIMAL(12,2) NOT NULL,
-    year INT NOT NULL,
-    description TEXT,
-    paid_at TIMESTAMP NULL DEFAULT NULL,
-    paid_by INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
-    FOREIGN KEY (paid_by) REFERENCES admins(id) ON DELETE SET NULL
+    year YEAR NOT NULL,
+    appropriated_amount DECIMAL(14,2) NOT NULL,
+    total_savings DECIMAL(14,2) NOT NULL,
+    members_count INT NOT NULL DEFAULT 0,
+    generated_by INT NOT NULL,
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (generated_by) REFERENCES admins(id) ON DELETE CASCADE
 );
 
 -- ------------------------------------------------------------
@@ -225,13 +228,17 @@ CREATE TABLE payroll_exports (
 -- ------------------------------------------------------------
 -- Default Admin Accounts (password: mdcan2024)
 -- ------------------------------------------------------------
+-- Default password for all accounts: mdcan2024
 INSERT INTO admins (name, email, password, role, phone) VALUES
 ('MDCAN Director', 'director@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'director', '08000000001'),
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'director', '08000000001'),
 ('MDCAN Secretary', 'secretary@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'secretary', '08000000002');
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'secretary', '08000000002');
 
--- Demo member (password: mdcan2024)
+-- Demo member (password: mdcan2024) - pre-approved for demo use
 INSERT INTO members (mno, name, department, gsm, email, password, bank_name, account_number, next_of_kin, next_of_kin_gsm, registration_date, status) VALUES
-('MNO-001', 'Demo Member', 'Administration', '08011111111', 'member@mdcan.edu.ng',
- '$2y$10$8K1p/a0dN1CIPRGaFPtU1uqRIqMwRLZBLHRhR.BvHNKP6DM7BxaSi', 'First Bank', '1234567890', 'Demo Next of Kin', '08022222222', CURDATE(), 'active');
+('MNO-0001', 'Demo Member', 'Administration', '08011111111', 'member@mdcan.edu.ng',
+ '$2y$10$oaHlnF6XlecTT6RZg9ixHutkcXcHik1hrPIuT97IPtUSr5adTaq/.', 'First Bank', '1234567890', 'Demo Next of Kin', '08022222222', CURDATE(), 'active');
+
+-- Create shares entry for demo member
+INSERT INTO member_shares (member_id) SELECT id FROM members WHERE mno='MNO-0001';

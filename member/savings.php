@@ -27,7 +27,7 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="info-box bg-success mb-3">
             <span class="info-box-icon"><i class="fas fa-piggy-bank"></i></span>
             <div class="info-box-content">
-                <span class="info-box-text">Total Savings</span>
+                <span class="info-box-text">Available Savings</span>
                 <span class="info-box-number"><?= formatCurrency($totalSavings) ?></span>
             </div>
         </div>
@@ -42,10 +42,12 @@ require_once __DIR__ . '/../includes/header.php';
                     <tbody>
                     <?php if (empty($monthly)): ?>
                     <tr><td colspan="2" class="text-center text-muted">No records</td></tr>
-                    <?php else: foreach ($monthly as $m): ?>
+                    <?php else: foreach ($monthly as $m): $neg = $m['total'] < 0; ?>
                     <tr>
                         <td><?= date('M Y', strtotime($m['month_year'] . '-01')) ?></td>
-                        <td><?= formatCurrency($m['total']) ?></td>
+                        <td class="font-weight-bold <?= $neg ? 'text-danger' : 'text-success' ?>">
+                            <?= $neg ? '-' : '' ?><?= formatCurrency(abs($m['total'])) ?>
+                        </td>
                     </tr>
                     <?php endforeach; endif; ?>
                     </tbody>
@@ -78,11 +80,13 @@ require_once __DIR__ . '/../includes/header.php';
                     <tbody>
                     <?php if (empty($savings)): ?>
                     <tr><td colspan="7" class="text-center text-muted py-4">No savings recorded yet.</td></tr>
-                    <?php else: foreach ($savings as $i => $s): ?>
-                    <tr>
+                    <?php else: foreach ($savings as $i => $s): $isWd = $s['type'] === 'withdrawal'; ?>
+                    <tr class="<?= $isWd ? 'table-danger' : '' ?>">
                         <td><?= $i + 1 ?></td>
-                        <td class="text-success font-weight-bold"><?= formatCurrency($s['amount']) ?></td>
-                        <td><span class="badge badge-info"><?= ucfirst($s['type']) ?></span></td>
+                        <td class="font-weight-bold <?= $isWd ? 'text-danger' : 'text-success' ?>">
+                            <?= $isWd ? '-' : '' ?><?= formatCurrency(abs($s['amount'])) ?>
+                        </td>
+                        <td><span class="badge badge-<?= $isWd ? 'danger' : 'info' ?>"><?= ucfirst($s['type']) ?></span></td>
                         <td><?= $s['month_year'] ?? '-' ?></td>
                         <td><?= sanitize($s['description'] ?? '-') ?></td>
                         <td><?= sanitize($s['recorded_by_name'] ?? 'System') ?></td>

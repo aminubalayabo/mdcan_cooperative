@@ -150,6 +150,11 @@ $currentPage = basename($_SERVER['PHP_SELF']);
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="<?= BASE_URL ?>/admin/secretary/loan_repayments.php" class="nav-link <?= $currentPage === 'loan_repayments.php' ? 'active' : '' ?>">
+                        <i class="nav-icon fas fa-hand-holding-usd"></i><p>Loan Repayments</p>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="<?= BASE_URL ?>/admin/secretary/withdrawals.php" class="nav-link <?= $currentPage === 'withdrawals.php' ? 'active' : '' ?>">
                         <i class="nav-icon fas fa-money-check-alt"></i><p>Withdrawals</p>
                     </a>

@@ -93,7 +93,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </div>
                     <div class="form-group">
                         <label>Amount (&#8358;) <span class="text-danger">*</span></label>
-                        <input type="number" name="amount" class="form-control" min="1" max="<?= $totalSavings ?>" step="100" required>
+                        <input type="number" name="amount" class="form-control" min="1" max="<?= $totalSavings ?>" step="1" required>
                         <small class="text-muted">Max: <?= formatCurrency($totalSavings) ?></small>
                     </div>
                     <div class="form-group">

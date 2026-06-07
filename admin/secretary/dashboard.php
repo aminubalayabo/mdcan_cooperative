@@ -8,7 +8,7 @@ $pageTitle = 'Secretary Dashboard';
 $totalMembers      = (int)$pdo->query("SELECT COUNT(*) FROM members WHERE status='active'")->fetchColumn();
 $pendingLoans      = (int)$pdo->query("SELECT COUNT(*) FROM loans WHERE status='pending'")->fetchColumn();
 $totalSavingsMonth = (float)$pdo->query("SELECT COALESCE(SUM(amount),0) FROM savings WHERE month_year = '" . date('Y-m') . "'")->fetchColumn();
-$pendingWithdrawals= (int)$pdo->query("SELECT COUNT(*) FROM savings_withdrawals WHERE status='pending'")->fetchColumn();
+$pendingWithdrawals= (int)$pdo->query("SELECT COUNT(*) FROM savings_withdrawals WHERE status IN ('pending','approved')")->fetchColumn();
 
 // Recent loan applications
 $recentLoans = $pdo->query("SELECT l.*, m.name AS member_name, m.mno FROM loans l
@@ -17,6 +17,11 @@ $recentLoans = $pdo->query("SELECT l.*, m.name AS member_name, m.mno FROM loans 
 
 // Recent members
 $recentMembers = $pdo->query("SELECT * FROM members ORDER BY created_at DESC LIMIT 5")->fetchAll();
+
+// Recent savings records (includes withdrawal deductions)
+$recentSavingsRecords = $pdo->query("SELECT s.*, m.name AS member_name, m.mno FROM savings s
+    JOIN members m ON s.member_id = m.id
+    ORDER BY s.created_at DESC LIMIT 8")->fetchAll();
 
 require_once __DIR__ . '/../../includes/header.php';
 ?>
@@ -75,6 +80,9 @@ require_once __DIR__ . '/../../includes/header.php';
                 <a href="<?= BASE_URL ?>/admin/secretary/loans.php" class="btn btn-warning mr-2 mb-2">
                     <i class="fas fa-file-invoice-dollar mr-1"></i>Review Loans
                 </a>
+                <a href="<?= BASE_URL ?>/admin/secretary/dividends.php" class="btn btn-success mr-2 mb-2">
+                    <i class="fas fa-percentage mr-1"></i>Dividend
+                </a>
                 <a href="<?= BASE_URL ?>/admin/secretary/payroll.php" class="btn btn-info mr-2 mb-2">
                     <i class="fas fa-file-export mr-1"></i>Export Payroll
                 </a>
@@ -127,6 +135,48 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="card-footer">
                 <a href="<?= BASE_URL ?>/admin/secretary/members.php" class="btn btn-sm btn-default btn-block">View All Members</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Savings Records -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-piggy-bank mr-2"></i>Recent Savings Records</h3>
+                <div class="card-tools">
+                    <a href="<?= BASE_URL ?>/admin/secretary/savings.php" class="btn btn-sm btn-tool"><i class="fas fa-external-link-alt"></i></a>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="thead-light">
+                        <tr><th>Member</th><th>Amount</th><th>Type</th><th>Month</th><th>Date</th></tr>
+                    </thead>
+                    <tbody>
+                    <?php if (empty($recentSavingsRecords)): ?>
+                    <tr><td colspan="5" class="text-center text-muted py-3">No savings records yet.</td></tr>
+                    <?php else: foreach ($recentSavingsRecords as $s): $isWd = $s['type'] === 'withdrawal'; ?>
+                    <tr class="<?= $isWd ? 'table-danger' : '' ?>">
+                        <td>
+                            <?= sanitize($s['member_name']) ?><br>
+                            <small class="text-muted"><?= sanitize($s['mno']) ?></small>
+                        </td>
+                        <td class="font-weight-bold <?= $isWd ? 'text-danger' : 'text-success' ?>">
+                            <?= $isWd ? '-' : '' ?><?= formatCurrency(abs($s['amount'])) ?>
+                        </td>
+                        <td><span class="badge badge-<?= $isWd ? 'danger' : 'info' ?>"><?= ucfirst($s['type']) ?></span></td>
+                        <td><?= $s['month_year'] ?? '-' ?></td>
+                        <td><?= date('M d, Y', strtotime($s['created_at'])) ?></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <a href="<?= BASE_URL ?>/admin/secretary/savings.php" class="btn btn-sm btn-default btn-block">View Full Savings History</a>
             </div>
         </div>
     </div>

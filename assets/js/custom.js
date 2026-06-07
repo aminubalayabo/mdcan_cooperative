@@ -53,7 +53,13 @@ $(document).ready(function () {
     });
 
     // Prevent double-form submission
+    // Before disabling the submit button, copy its name=value to a hidden input
+    // so the action key is still present in POST after the button is disabled.
     $('form').on('submit', function () {
-        $(this).find('[type=submit]').prop('disabled', true).text('Processing...');
+        var $btn = $(this).find('[type=submit]:not([name=""])');
+        if ($btn.length && $btn.attr('name')) {
+            $('<input type="hidden">').attr('name', $btn.attr('name')).val($btn.val() || '1').appendTo(this);
+        }
+        $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm mr-1"></span>Processing...');
     });
 });
